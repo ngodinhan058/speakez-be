@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from typing import List
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
+import requests
 
 #define model and graph
 llm = ChatOpenAI(
@@ -23,12 +24,14 @@ start = False
 graph = StateGraph(State)
 
 #get info node
-get_info_template = """You are an foreign language-speaking assistant helping users practice foreign language conversation.
-Get the following information from them by ask one by one question:
-- Their foreign language
-- Their language proficiency level
-- The topic they want to practice 
-After you are able to discern all the information, call the relevant tool."""
+get_info_template = """You are a foreign language-speaking assistant helping users practice conversation.
+Ask one-by-one:
+- Foreign language
+- Proficiency level
+- Practice topic
+If user asks irrelevant questions, remind them of the previous question.
+After getting all info, call the info tool.
+"""
 
 def get_info_prompt(messages):
     return [SystemMessage(content=get_info_template)] + messages
@@ -48,9 +51,14 @@ def get_info(state: State):
     return {"messages": response}
 
 #make plan node
-make_plan_template = """You are an foreign language-speaking assistant helping users practice foreign language conversation.
-Talk with user base on their level and topic: {reqs}.
-Check if they have mistake in sentence and correct it. Sometimes encourage them.
+make_plan_template = """You are an assistant helping users practice language conversation.
+Language, topic and level: {reqs}
+- Beginner: use short, simple sentences
+- Intermediate: normal conversation
+- Advanced: complex sentences and vocabulary
+If the user's sentence has issues, correct it.
+If the user wants to end the conversation, say goodbye and inform them their progress is being calculated.
+Then call the progress tool.
 """
 
 def make_plan_prompt(messages: list):
@@ -95,26 +103,17 @@ graph.add_edge("make_plan", END)
 #define agent
 agent = graph.compile(checkpointer=MemorySaver())
 
-config = {"configurable": {"thread_id": "8"}}
-
-jwt_token = None
-def set_jwt_token(token):
-    global jwt_token
-    jwt_token = token
-
-import requests
-
-def response(query, text_id):
-    print(jwt_token)
+def response(token, query, chat_id):
+    print(token)
 
     headers = {
-        'Authorization': jwt_token,
+        'Authorization': token,
         'Content-Type': 'application/json',
     }
-    config = {"configurable": {"thread_id": "1"}}
+    config = {"configurable": {"thread_id": f'{chat_id}'}}
     res = agent.invoke({"messages": query}, config=config)
     try:
-        response = requests.post(f'http://127.0.0.1:5000/answers/{text_id}', headers=headers, json={'content': res['messages'][-1].content})
+        response = requests.post(f'http://127.0.0.1:5000/answers/{chat_id}', headers=headers, json={'content': res['messages'][-1].content})
     except: 
         print(response.status_code)
     print(response)
